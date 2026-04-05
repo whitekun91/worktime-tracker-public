@@ -27,7 +27,7 @@ export async function GET(request: Request) {
 
   const deviceId = parseDeviceId(request.headers.get("x-device-id"));
   if (!deviceId) {
-    return NextResponse.json({ error: "유효한 x-device-id 헤더가 필요합니다." }, { status: 400 });
+    return NextResponse.json({ error: "A valid x-device-id header is required." }, { status: 400 });
   }
 
   try {
@@ -48,18 +48,18 @@ export async function GET(request: Request) {
     });
   } catch (e) {
     console.error(e);
-    return NextResponse.json({ error: "DB 조회에 실패했습니다." }, { status: 500 });
+    return NextResponse.json({ error: "Failed to load punches from the database." }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   if (!isDbConfigured()) {
-    return NextResponse.json({ error: "DATABASE_URL이 설정되지 않았습니다." }, { status: 503 });
+    return NextResponse.json({ error: "DATABASE_URL is not configured." }, { status: 503 });
   }
 
   const deviceId = parseDeviceId(request.headers.get("x-device-id"));
   if (!deviceId) {
-    return NextResponse.json({ error: "유효한 x-device-id 헤더가 필요합니다." }, { status: 400 });
+    return NextResponse.json({ error: "A valid x-device-id header is required." }, { status: 400 });
   }
 
   try {
@@ -88,23 +88,23 @@ export async function POST(request: Request) {
     const insertedList = asRows<Row>(inserted);
     const row = insertedList[0];
     if (!row) {
-      return NextResponse.json({ error: "저장 결과를 읽지 못했습니다." }, { status: 500 });
+      return NextResponse.json({ error: "Could not read inserted punch." }, { status: 500 });
     }
     return NextResponse.json({ punch: rowToPunch(row) });
   } catch (e) {
     console.error(e);
-    return NextResponse.json({ error: "기록 저장에 실패했습니다." }, { status: 500 });
+    return NextResponse.json({ error: "Failed to save punch." }, { status: 500 });
   }
 }
 
 export async function DELETE(request: Request) {
   if (!isDbConfigured()) {
-    return NextResponse.json({ error: "DATABASE_URL이 설정되지 않았습니다." }, { status: 503 });
+    return NextResponse.json({ error: "DATABASE_URL is not configured." }, { status: 503 });
   }
 
   const deviceId = parseDeviceId(request.headers.get("x-device-id"));
   if (!deviceId) {
-    return NextResponse.json({ error: "유효한 x-device-id 헤더가 필요합니다." }, { status: 400 });
+    return NextResponse.json({ error: "A valid x-device-id header is required." }, { status: 400 });
   }
 
   try {
@@ -114,6 +114,6 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error(e);
-    return NextResponse.json({ error: "삭제에 실패했습니다." }, { status: 500 });
+    return NextResponse.json({ error: "Failed to delete punches." }, { status: 500 });
   }
 }

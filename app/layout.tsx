@@ -14,11 +14,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "출퇴근 기록",
-  description: "버튼으로 출근·퇴근 시간을 기록합니다.",
+  title: "Worktime log",
+  description: "Clock in and out with a tap.",
   appleWebApp: {
     capable: true,
-    title: "출퇴근 기록",
+    title: "Worktime log",
     statusBarStyle: "default",
   },
   formatDetection: {
@@ -40,7 +40,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="ko"
+      lang="en"
       className={`${geistSans.variable} ${geistMono.variable} min-h-dvh antialiased`}
     >
       <body className="flex min-h-dvh flex-col text-base">

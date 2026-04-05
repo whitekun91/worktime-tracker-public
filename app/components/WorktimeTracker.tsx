@@ -7,7 +7,7 @@ import {
   MS_BREAK_30,
   MS_HOUR,
   laborBreakDeductionMs,
-  laborBreakDeductionLabelKo,
+  laborBreakDeductionLabel,
   netWorkingMsAfterLaborBreak,
 } from "@/lib/labor-break";
 import { formatMsAsHms } from "@/lib/time-format";
@@ -65,15 +65,15 @@ function deviceHeaders(): HeadersInit {
   return { "x-device-id": getOrCreateDeviceId() };
 }
 
-function formatKoreanDateTime(iso: string) {
+function formatLocaleDateTime(iso: string) {
   const d = new Date(iso);
-  return new Intl.DateTimeFormat("ko-KR", {
+  return new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
     timeStyle: "medium",
   }).format(d);
 }
 
-/** 해당 인덱스의 퇴근에 대응하는 직전 출근 인덱스 */
+/** Index of the clock-in that pairs with the clock-out at `outIndex` */
 function findPrevInIndex(punches: Punch[], outIndex: number): number | null {
   for (let j = outIndex - 1; j >= 0; j--) {
     if (punches[j].type === "in") return j;
@@ -81,7 +81,7 @@ function findPrevInIndex(punches: Punch[], outIndex: number): number | null {
   return null;
 }
 
-/** 출근~퇴근 구간의 실근무 ms (휴게 차감 반영), 짝이 없으면 null */
+/** Net working ms for in→out segment (break rules applied); null if unmatched */
 function netWorkingMsForOutPunch(punches: Punch[], outIndex: number): number | null {
   const inIdx = findPrevInIndex(punches, outIndex);
   if (inIdx === null) return null;
@@ -95,12 +95,12 @@ function netWorkingMsForOutPunch(punches: Punch[], outIndex: number): number | n
 export default function WorktimeTracker() {
   const [punches, setPunches] = useState<Punch[]>([]);
   const [configured, setConfigured] = useState(true);
-  /** DB 없을 때 dev에서만 로컬 저장으로 출근/퇴근 테스트 */
+  /** Local-only punches in dev when DB is unavailable */
   const [localDevPunch, setLocalDevPunch] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  /** 개발용: 출근 누적(ms)에 더해 휴게 구간을 바로 테스트 */
+  /** Dev: add minutes to elapsed time to test break thresholds */
   const [devAddMinutes, setDevAddMinutes] = useState(0);
 
   const punchesSaveReady = configured || localDevPunch;
@@ -136,7 +136,7 @@ export default function WorktimeTracker() {
         error?: string;
       };
       if (!res.ok) {
-        setLoadError(data.error ?? "목록을 불러오지 못했습니다.");
+        setLoadError(data.error ?? "Could not load punches.");
         return;
       }
       const ok = data.configured !== false;
@@ -149,7 +149,7 @@ export default function WorktimeTracker() {
         setPunches(Array.isArray(data.punches) ? data.punches : []);
       }
     } catch {
-      setLoadError("네트워크 오류로 목록을 불러오지 못했습니다.");
+      setLoadError("Network error while loading punches.");
     }
   }, []);
 
@@ -199,7 +199,7 @@ export default function WorktimeTracker() {
     [elapsedForLaborMs]
   );
 
-  /** 직전 퇴근까지 구간(마지막 출근~퇴근) 요약 — 퇴근 상태에서만 */
+  /** Last closed in→out segment summary (only when clocked out) */
   const lastClosedSegment = useMemo(() => {
     if (isWorking) return null;
     const last = punches[punches.length - 1];
@@ -215,7 +215,7 @@ export default function WorktimeTracker() {
     return { rawMs, netMs, breakDeductionMs };
   }, [isWorking, punches]);
 
-  /** 출근 시각 + 누적 4h30m / 9h 시점(실근무 4h / 8h, 앱의 휴게 차감 규칙과 동일) */
+  /** Wall times for 4h30m / 9h raw elapsed (4h / 8h net under app rules) */
   const laborMilestoneWallMs = useMemo(() => {
     if (!clockInAt) return null;
     const start = new Date(clockInAt).getTime();
@@ -255,14 +255,14 @@ export default function WorktimeTracker() {
       });
       const data = (await res.json()) as { punch?: Punch; error?: string };
       if (!res.ok) {
-        setLoadError(data.error ?? "저장에 실패했습니다.");
+        setLoadError(data.error ?? "Could not save punch.");
         return;
       }
       if (data.punch) {
         setPunches((prev) => [...prev, data.punch!]);
       }
     } catch {
-      setLoadError("네트워크 오류로 저장하지 못했습니다.");
+      setLoadError("Network error while saving punch.");
     } finally {
       setPending(false);
     }
@@ -270,7 +270,7 @@ export default function WorktimeTracker() {
 
   const clearAll = useCallback(async () => {
     if (punches.length === 0 || !punchesSaveReady) return;
-    if (typeof window !== "undefined" && !window.confirm("모든 기록을 지울까요?")) return;
+    if (typeof window !== "undefined" && !window.confirm("Delete all punches for this device?")) return;
 
     if (localDevPunch && !configured) {
       saveLocalDevPunches([]);
@@ -287,12 +287,12 @@ export default function WorktimeTracker() {
       });
       const data = (await res.json()) as { error?: string };
       if (!res.ok) {
-        setLoadError(data.error ?? "삭제에 실패했습니다.");
+        setLoadError(data.error ?? "Could not delete punches.");
         return;
       }
       setPunches([]);
     } catch {
-      setLoadError("네트워크 오류로 삭제하지 못했습니다.");
+      setLoadError("Network error while deleting punches.");
     } finally {
       setPending(false);
     }
@@ -310,35 +310,35 @@ export default function WorktimeTracker() {
     <div className="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col gap-5 px-2.5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-5 sm:gap-6 sm:px-3 sm:pt-7">
       <header className="shrink-0 text-center">
         <h1 className="text-[1.65rem] font-semibold leading-snug tracking-tight text-zinc-900 sm:text-3xl dark:text-zinc-50">
-          출퇴근 기록
+          Worktime log
         </h1>
         <div className="mt-2.5 space-y-1.5 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-          <p>버튼을 누를 때마다 출근·퇴근이 번갈아 기록돼요.</p>
+          <p>Each tap alternates clock-in and clock-out.</p>
           <p>
-            누적 근무가{" "}
+            Cumulative time{" "}
             <span className="font-medium text-zinc-800 dark:text-zinc-200">
-              4시간 이상 8시간 미만이면 30분, 8시간 이상이면 1시간
-            </span>
-            휴게를 실근무에서 빼서 보여 줘요.
+              from 4h to under 8h deducts 30m break; 8h+ deducts 1h
+            </span>{" "}
+            from displayed working time.
           </p>
           <p>
-            Neon에 저장돼요.{" "}
-            <span className="font-medium text-zinc-800 dark:text-zinc-200">7일 지난 기록</span>은 자동으로
-            지워져요.
+            Stored in Postgres (e.g. Neon).{" "}
+            <span className="font-medium text-zinc-800 dark:text-zinc-200">Entries older than 7 days</span> can be
+            removed by the cleanup job.
           </p>
         </div>
         {!configured && hydrated && (
           <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-base leading-snug text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
-            배포 환경에 Postgres 연결 문자열{" "}
-            <code className="text-[0.8rem] sm:text-sm">DATABASE_URL</code>(또는 일부 호스팅의{" "}
-            <code className="text-[0.8rem] sm:text-sm">POSTGRES_URL</code>)을 설정하면 DB 저장이 활성화됩니다. (Neon·Supabase
-            등 호스트 대시보드의 환경 변수 메뉴에서 설정)
+            Set a Postgres connection string in your deployment:{" "}
+            <code className="text-[0.8rem] sm:text-sm">DATABASE_URL</code> (or{" "}
+            <code className="text-[0.8rem] sm:text-sm">POSTGRES_URL</code> on some hosts) to enable database storage.
+            Configure it in your host&apos;s environment variables (e.g. Neon, Supabase).
             {IS_DEV && (
               <>
                 {" "}
                 <span className="font-medium">
-                  로컬 개발(<code className="text-[0.8rem] sm:text-sm">npm run dev</code>)에서는 DB 없이도 출근 버튼이
-                  동작하며, 이 브라우저에만 기록이 저장됩니다.
+                  In local dev (<code className="text-[0.8rem] sm:text-sm">npm run dev</code>), clock-in works without a
+                  DB; punches stay in this browser only.
                 </span>
               </>
             )}
@@ -358,19 +358,19 @@ export default function WorktimeTracker() {
           }`}
         >
           {!hydrated
-            ? "불러오는 중…"
+            ? "Loading…"
             : localDevPunch && !configured
-              ? "로컬 테스트 (DB 없음)"
+              ? "Local test (no DB)"
               : !configured
-                ? "DB 미연결"
+                ? "Database not connected"
                 : isWorking
-                  ? "현재 근무 중"
-                  : "퇴근 상태"}
+                  ? "On the clock"
+                  : "Clocked out"}
         </p>
 
         <div className="flex w-full max-w-md flex-col items-center gap-2">
           <span className="text-sm font-medium tracking-wide text-zinc-500 dark:text-zinc-400">
-            실근무 시간
+            Net working time
           </span>
           {IS_DEV && isWorking && hydrated && punchesSaveReady && (
             <div className="w-full rounded-lg border border-dashed border-violet-400/80 bg-violet-50/90 px-3 py-2.5 dark:border-violet-600 dark:bg-violet-950/40">
@@ -378,7 +378,7 @@ export default function WorktimeTracker() {
                 htmlFor="dev-add-minutes"
                 className="mb-1.5 block text-left text-xs font-semibold leading-snug text-violet-900 dark:text-violet-200"
               >
-                테스트: 누적에 더할 분 (실근무 타이머에 바로 반영)
+                Dev: minutes to add to elapsed (applies to net timer)
               </label>
               <input
                 id="dev-add-minutes"
@@ -394,11 +394,11 @@ export default function WorktimeTracker() {
                 className="w-full rounded-md border border-violet-200 bg-white px-2.5 py-2 font-mono text-base text-zinc-900 dark:border-violet-700 dark:bg-zinc-950 dark:text-zinc-100"
               />
               <p className="mt-1.5 text-left text-xs leading-snug text-violet-800 dark:text-violet-300">
-                실제 경과 {formatMsAsHms(elapsedRawMs)}
+                Actual elapsed {formatMsAsHms(elapsedRawMs)}
                 {devAddMinutes > 0 && (
                   <>
                     {" "}
-                    + 가산 {devAddMinutes}분 → 계산 기준 {formatMsAsHms(elapsedForLaborMs)}
+                    + {devAddMinutes}m → basis {formatMsAsHms(elapsedForLaborMs)}
                   </>
                 )}
               </p>
@@ -406,7 +406,7 @@ export default function WorktimeTracker() {
           )}
           {IS_DEV && !isWorking && hydrated && punchesSaveReady && (
             <p className="w-full text-center text-xs leading-snug text-violet-700/90 dark:text-violet-400">
-              출근하면 위에 &quot;더할 분&quot;으로 4h·8h 구간을 바로 테스트할 수 있습니다.
+              After clock-in, use &quot;minutes to add&quot; above to jump to 4h / 8h thresholds.
             </p>
           )}
           <div
@@ -430,7 +430,7 @@ export default function WorktimeTracker() {
             ) : lastClosedSegment && hydrated && punchesSaveReady ? (
               <>
                 <p className="w-full text-center text-xs font-normal leading-snug text-zinc-500 dark:text-zinc-400 sm:text-sm">
-                  출근~퇴근 실제 경과{" "}
+                  In→out raw elapsed{" "}
                   <span className="font-mono font-medium text-zinc-700 dark:text-zinc-300">
                     {formatMsAsHms(lastClosedSegment.rawMs)}
                   </span>
@@ -440,7 +440,7 @@ export default function WorktimeTracker() {
                 </span>
                 {lastClosedSegment.breakDeductionMs > 0 ? (
                   <p className="w-full text-center text-[11px] leading-snug text-zinc-500 dark:text-zinc-400 sm:text-sm">
-                    휴게 차감 {laborBreakDeductionLabelKo(lastClosedSegment.breakDeductionMs)}
+                    Break deduction {laborBreakDeductionLabel(lastClosedSegment.breakDeductionMs)}
                   </p>
                 ) : null}
               </>
@@ -453,7 +453,7 @@ export default function WorktimeTracker() {
           {isWorking && clockInAt && hydrated && punchesSaveReady && (
             <div className="flex w-full flex-col gap-1.5 text-center text-xs leading-snug text-zinc-500 sm:text-sm dark:text-zinc-400">
               <p>
-                출근 시각 기준 실제 누적{" "}
+                Raw elapsed since clock-in{" "}
                 <span className="font-mono font-medium text-zinc-700 dark:text-zinc-300">
                   {formatMsAsHms(elapsedRawMs)}
                 </span>
@@ -462,7 +462,7 @@ export default function WorktimeTracker() {
                 <p className="text-[11px] leading-snug sm:text-sm">
                   {IS_DEV && devAddMinutes > 0 && (
                     <>
-                      가산 {devAddMinutes}분 반영 시 계산 누적{" "}
+                      With +{devAddMinutes}m, basis elapsed{" "}
                       <span className="font-mono font-medium text-zinc-700 dark:text-zinc-300">
                         {formatMsAsHms(elapsedForLaborMs)}
                       </span>
@@ -472,7 +472,7 @@ export default function WorktimeTracker() {
                     <span className="mx-1 text-zinc-400 dark:text-zinc-500">·</span>
                   )}
                   {breakDeductionMs > 0 && (
-                    <>휴게 차감 {laborBreakDeductionLabelKo(breakDeductionMs)}</>
+                    <>Break deduction {laborBreakDeductionLabel(breakDeductionMs)}</>
                   )}
                 </p>
               ) : null}
@@ -481,8 +481,8 @@ export default function WorktimeTracker() {
           {!isWorking && hydrated && punchesSaveReady && (
             <p className="text-center text-xs leading-relaxed text-zinc-500 sm:text-sm dark:text-zinc-400">
               {lastClosedSegment
-                ? "다시 출근하면 새 구간부터 이어집니다."
-                : "출근하면 실근무 시간이 표시됩니다"}
+                ? "Clock in again to start a new segment."
+                : "Clock in to show net working time."}
             </p>
           )}
         </div>
@@ -497,21 +497,21 @@ export default function WorktimeTracker() {
               : "bg-emerald-600 hover:bg-emerald-700"
           }`}
         >
-          {isWorking ? "퇴근" : "출근"}
+          {isWorking ? "Out" : "In"}
         </button>
 
       </div>
 
       <section className="flex min-h-0 flex-1 flex-col">
         <div className="mb-3 flex shrink-0 items-center justify-between">
-          <h2 className="text-base font-medium text-zinc-700 dark:text-zinc-300">최근 기록</h2>
+          <h2 className="text-base font-medium text-zinc-700 dark:text-zinc-300">Recent punches</h2>
           <button
             type="button"
             onClick={() => void clearAll()}
             disabled={!hydrated || !punchesSaveReady || punches.length === 0 || pending}
             className="text-sm text-zinc-500 underline-offset-2 hover:text-zinc-800 hover:underline disabled:opacity-40 dark:hover:text-zinc-200"
           >
-            전체 삭제
+            Clear all
           </button>
         </div>
 
@@ -522,31 +522,31 @@ export default function WorktimeTracker() {
           laborMilestoneWallMs && (
             <div className="mb-3 shrink-0 space-y-2 rounded-xl border border-emerald-200/90 bg-emerald-50/60 p-3 sm:p-3.5 dark:border-emerald-900/60 dark:bg-emerald-950/35">
               <p className="text-sm font-medium leading-snug text-emerald-900 dark:text-emerald-200">
-                이번 출근 기준 예상 시각
+                Estimated times (this clock-in)
               </p>
               <ul className="space-y-2 text-sm">
                 <li className="rounded-lg bg-white/90 px-2.5 py-2 dark:bg-zinc-900/70">
                   <div className="text-zinc-600 dark:text-zinc-400">
-                    실근무 4시간 (출근 시각 기준 누적 4시간 30분)
+                    4h net (4h 30m raw since clock-in)
                   </div>
                   <div className="mt-0.5 font-mono text-base text-zinc-900 dark:text-zinc-100">
-                    {formatKoreanDateTime(new Date(laborMilestoneWallMs.at4h30Raw).toISOString())}
+                    {formatLocaleDateTime(new Date(laborMilestoneWallMs.at4h30Raw).toISOString())}
                     {nowMs >= laborMilestoneWallMs.at4h30Raw ? (
                       <span className="ml-2 font-sans text-sm font-medium text-emerald-600 dark:text-emerald-400">
-                        도달
+                        reached
                       </span>
                     ) : null}
                   </div>
                 </li>
                 <li className="rounded-lg bg-white/90 px-2.5 py-2 dark:bg-zinc-900/70">
                   <div className="text-zinc-600 dark:text-zinc-400">
-                    실근무 8시간 (출근 시각 기준 누적 9시간)
+                    8h net (9h raw since clock-in)
                   </div>
                   <div className="mt-0.5 font-mono text-base text-zinc-900 dark:text-zinc-100">
-                    {formatKoreanDateTime(new Date(laborMilestoneWallMs.at9hRaw).toISOString())}
+                    {formatLocaleDateTime(new Date(laborMilestoneWallMs.at9hRaw).toISOString())}
                     {nowMs >= laborMilestoneWallMs.at9hRaw ? (
                       <span className="ml-2 font-sans text-sm font-medium text-emerald-600 dark:text-emerald-400">
-                        도달
+                        reached
                       </span>
                     ) : null}
                   </div>
@@ -558,15 +558,17 @@ export default function WorktimeTracker() {
         <div className="flex min-h-0 flex-1 flex-col">
           {!hydrated ? (
             <div className="flex flex-1 items-start rounded-xl border border-zinc-200 bg-white px-3 py-3.5 dark:border-zinc-800 dark:bg-zinc-950">
-              <p className="text-base leading-relaxed text-zinc-500">기록을 불러오는 중입니다.</p>
+              <p className="text-base leading-relaxed text-zinc-500">Loading punches…</p>
             </div>
           ) : !punchesSaveReady ? (
             <div className="flex flex-1 items-start rounded-xl border border-zinc-200 bg-white px-3 py-3.5 dark:border-zinc-800 dark:bg-zinc-950">
-              <p className="text-base leading-relaxed text-zinc-500">DB 연결 후 이 기기의 기록이 여기에 표시됩니다.</p>
+              <p className="text-base leading-relaxed text-zinc-500">
+                After the database is connected, this device&apos;s punches appear here.
+              </p>
             </div>
           ) : punches.length === 0 ? (
             <div className="flex flex-1 items-start rounded-xl border border-zinc-200 bg-white px-3 py-3.5 dark:border-zinc-800 dark:bg-zinc-950">
-              <p className="text-base leading-relaxed text-zinc-500">아직 기록이 없습니다. 출근을 눌러 시작하세요.</p>
+              <p className="text-base leading-relaxed text-zinc-500">No punches yet. Tap In to start.</p>
             </div>
           ) : (
             <ul
@@ -594,15 +596,15 @@ export default function WorktimeTracker() {
                           : "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200"
                       }`}
                     >
-                      {p.type === "in" ? "출근" : "퇴근"}
+                      {p.type === "in" ? "In" : "Out"}
                     </span>
                     <span className="truncate font-mono text-sm text-zinc-600 dark:text-zinc-400">
-                      {formatKoreanDateTime(p.at)}
+                      {formatLocaleDateTime(p.at)}
                     </span>
                   </div>
                   {outSecondLine ? (
                     <p className="w-full text-right text-sm tabular-nums text-zinc-600 dark:text-zinc-400">
-                      실근무{" "}
+                      Net{" "}
                       <span className="font-mono font-semibold text-zinc-800 dark:text-zinc-200">
                         {formatMsAsHms(netForOut)}
                       </span>

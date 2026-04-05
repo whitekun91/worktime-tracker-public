@@ -2,9 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "출퇴근 기록",
-    short_name: "출퇴근",
-    description: "버튼으로 출근·퇴근 시간을 기록합니다.",
+    name: "Worktime log",
+    short_name: "Worktime",
+    description: "Clock in and out with a tap.",
     start_url: "/",
     scope: "/",
     display: "standalone",
