@@ -10,6 +10,8 @@ import {
   laborBreakDeductionLabel,
   netWorkingMsAfterLaborBreak,
 } from "@/lib/labor-break";
+import type { AgendaItem } from "@/lib/google-calendar";
+import { isPunch, type Punch, type PunchType } from "@/lib/punches";
 import { formatMsAsHms } from "@/lib/time-format";
 
 const DEVICE_KEY = "worktime-device-id";
@@ -26,15 +28,7 @@ function loadLocalDevPunches(): Punch[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (p): p is Punch =>
-        p &&
-        typeof p === "object" &&
-        "id" in p &&
-        "type" in p &&
-        "at" in p &&
-        (p.type === "in" || p.type === "out")
-    );
+    return parsed.filter(isPunch);
   } catch {
     return [];
   }
@@ -43,14 +37,6 @@ function loadLocalDevPunches(): Punch[] {
 function saveLocalDevPunches(punches: Punch[]) {
   localStorage.setItem(LOCAL_PUNCHES_DEV_KEY, JSON.stringify(punches));
 }
-
-export type PunchType = "in" | "out";
-
-export type Punch = {
-  id: string;
-  type: PunchType;
-  at: string;
-};
 
 function getOrCreateDeviceId(): string {
   let id = localStorage.getItem(DEVICE_KEY);
@@ -100,6 +86,9 @@ export default function WorktimeTracker() {
   const [hydrated, setHydrated] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [agenda, setAgenda] = useState<AgendaItem[]>([]);
+  const [agendaConfigured, setAgendaConfigured] = useState(false);
+  const [agendaError, setAgendaError] = useState<string | null>(null);
   /** Dev: add minutes to elapsed time to test break thresholds */
   const [devAddMinutes, setDevAddMinutes] = useState(0);
 
@@ -177,6 +166,41 @@ export default function WorktimeTracker() {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, [clockInAt]);
+
+  const [agendaNowMs, setAgendaNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setAgendaNowMs(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const loadAgenda = useCallback(async () => {
+    try {
+      const res = await fetch("/api/calendar/today");
+      const data = (await res.json()) as {
+        configured?: boolean;
+        events?: AgendaItem[];
+        error?: string;
+      };
+      if (!res.ok) {
+        setAgendaConfigured(false);
+        setAgenda([]);
+        setAgendaError("Could not load today's schedule.");
+        return;
+      }
+      setAgendaConfigured(data.configured === true);
+      setAgenda(Array.isArray(data.events) ? data.events : []);
+      setAgendaError(data.error ?? null);
+    } catch {
+      setAgendaConfigured(false);
+      setAgenda([]);
+      setAgendaError("Could not load today's schedule.");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    void loadAgenda();
+  }, [hydrated, agendaNowMs, loadAgenda]);
 
   const elapsedRawMs = useMemo(() => {
     if (!clockInAt) return 0;
@@ -503,6 +527,33 @@ export default function WorktimeTracker() {
       </div>
 
       <section className="flex min-h-0 flex-1 flex-col">
+        <div className="mb-3 shrink-0 rounded-xl border border-sky-200/90 bg-sky-50/60 p-3 sm:p-3.5 dark:border-sky-900/60 dark:bg-sky-950/35">
+          <p className="text-sm font-medium leading-snug text-sky-900 dark:text-sky-200">
+            Today&apos;s schedule (optional)
+          </p>
+          {!hydrated ? (
+            <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">Loading schedule…</p>
+          ) : !agendaConfigured ? (
+            <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">
+              Set <code>GOOGLE_CALENDAR_API_KEY</code> and <code>GOOGLE_CALENDAR_ID</code> to enable this section.
+            </p>
+          ) : agendaError ? (
+            <p className="mt-1.5 text-sm text-amber-700 dark:text-amber-300">{agendaError}</p>
+          ) : agenda.length === 0 ? (
+            <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">No events today.</p>
+          ) : (
+            <ul className="mt-2 space-y-1.5 text-sm">
+              {agenda.map((item) => (
+                <li key={item.id} className="rounded-md bg-white/80 px-2.5 py-1.5 dark:bg-zinc-900/70">
+                  <span className="font-mono text-zinc-500 dark:text-zinc-400">{item.timeLabel}</span>
+                  <span className="mx-2 text-zinc-400">·</span>
+                  <span className="text-zinc-800 dark:text-zinc-100">{item.title}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
         <div className="mb-3 flex shrink-0 items-center justify-between">
           <h2 className="text-base font-medium text-zinc-700 dark:text-zinc-300">Recent punches</h2>
           <button

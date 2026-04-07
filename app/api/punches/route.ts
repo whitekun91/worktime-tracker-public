@@ -20,15 +20,22 @@ function rowToPunch(r: Row) {
   return { id: r.id, type: r.type, at };
 }
 
+function readDeviceIdOrResponse(request: Request): string | NextResponse {
+  const deviceId = parseDeviceId(request.headers.get("x-device-id"));
+  if (!deviceId) {
+    return NextResponse.json({ error: "A valid x-device-id header is required." }, { status: 400 });
+  }
+  return deviceId;
+}
+
 export async function GET(request: Request) {
   if (!isDbConfigured()) {
     return NextResponse.json({ configured: false as const, punches: [] as Row[] });
   }
 
-  const deviceId = parseDeviceId(request.headers.get("x-device-id"));
-  if (!deviceId) {
-    return NextResponse.json({ error: "A valid x-device-id header is required." }, { status: 400 });
-  }
+  const device = readDeviceIdOrResponse(request);
+  if (device instanceof NextResponse) return device;
+  const deviceId = device;
 
   try {
     const sql = getSql();
@@ -57,10 +64,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "DATABASE_URL is not configured." }, { status: 503 });
   }
 
-  const deviceId = parseDeviceId(request.headers.get("x-device-id"));
-  if (!deviceId) {
-    return NextResponse.json({ error: "A valid x-device-id header is required." }, { status: 400 });
-  }
+  const device = readDeviceIdOrResponse(request);
+  if (device instanceof NextResponse) return device;
+  const deviceId = device;
 
   try {
     const sql = getSql();
@@ -102,10 +108,9 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "DATABASE_URL is not configured." }, { status: 503 });
   }
 
-  const deviceId = parseDeviceId(request.headers.get("x-device-id"));
-  if (!deviceId) {
-    return NextResponse.json({ error: "A valid x-device-id header is required." }, { status: 400 });
-  }
+  const device = readDeviceIdOrResponse(request);
+  if (device instanceof NextResponse) return device;
+  const deviceId = device;
 
   try {
     const sql = getSql();
